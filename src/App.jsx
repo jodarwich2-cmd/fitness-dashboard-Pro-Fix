@@ -8,6 +8,20 @@ function cn(...a){ return a.filter(Boolean).join(" "); }
 const COLORS = { gym: "#C29B2C", nutrition: "#16a34a", body: "#2563eb" };
 const GREEN700 = "#15803d"; // tailwind green-700
 
+// Tag palette
+const TAGS = [
+  { key: "legs", label: "Legs", color: "#9333ea" },
+  { key: "biceps", label: "Biceps", color: "#14b8a6" },
+  { key: "triceps", label: "Triceps", color: "#f97316" },
+  { key: "chest", label: "Chest", color: "#ef4444" },
+  { key: "back", label: "Back", color: "#0ea5e9" },
+  { key: "shoulders", label: "Shoulders", color: "#f59e0b" },
+  { key: "core", label: "Core", color: "#22c55e" },
+];
+
+const TAG_COLOR = Object.fromEntries(TAGS.map(t=>[t.key, t.color]));
+const TAG_LABEL = Object.fromEntries(TAGS.map(t=>[t.key, t.label]));
+
 // Plan window for progress bar
 const PLAN_START = new Date(2025, 6, 1); // July=6
 const PLAN_END = new Date(2026, 9, 8);   // Oct=9
@@ -19,7 +33,9 @@ export default function App(){
 
   // === DATA (keys unchanged so your existing data remains) ===
   const [exerciseDB, setExerciseDB] = useLocalStorageState("exDB", [
-    { id: uid(), name: "Bench Press" }, { id: uid(), name: "Squat" }, { id: uid(), name: "Lat Pulldown" }
+    { id: uid(), name: "Bench Press", tags: ["chest"] },
+    { id: uid(), name: "Squat", tags: ["legs"] },
+    { id: uid(), name: "Lat Pulldown", tags: ["back"] }
   ]);
   const [foodDB, setFoodDB] = useLocalStorageState("foodDB", [
     { id: uid(), name: "Chicken breast 100g", calories: 165, protein: 31, carbs: 0, fat: 3.6 },
@@ -28,6 +44,9 @@ export default function App(){
   const [gymLog, setGymLog] = useLocalStorageState("gymLog", []);
   const [nutritionLog, setNutritionLog] = useLocalStorageState("nutritionLog", []);
   const [bodyLog, setBodyLog] = useLocalStorageState("bodyLog", []);
+
+  // Normalize any existing exercises that don't have tags yet
+  const normalizedExerciseDB = React.useMemo(()=>exerciseDB.map(e=>({ ...e, tags: Array.isArray(e.tags) ? e.tags : [] })), [exerciseDB]);
 
   const topWeight = React.useMemo(()=>{
     const map = {}; for(const r of gymLog){ map[r.exerciseId] = Math.max(map[r.exerciseId]||0, Number(r.weight)||0); } return map;
@@ -96,7 +115,7 @@ export default function App(){
   const [calView, setCalView] = React.useState({ mode:"year", year:new Date().getFullYear(), month:new Date().getMonth(), selectedDay:null });
 
   function backupJSON(){
-    const payload = { unit, goals, exerciseDB, foodDB, gymLog, nutritionLog, bodyLog };
+    const payload = { unit, goals, exerciseDB: normalizedExerciseDB, foodDB, gymLog, nutritionLog, bodyLog };
     downloadText(`fitness-backup-${today}.json`, JSON.stringify(payload, null, 2));
   }
   function restoreJSON(e){
@@ -153,7 +172,7 @@ export default function App(){
                 </div>
                 <div>
                   <Card title={"Day details" + (calView.selectedDay? " · " + calView.selectedDay : "")}>
-                    {calView.selectedDay ? <DayDetails date={calView.selectedDay} dayData={byDate[calView.selectedDay]} exerciseDB={exerciseDB} foodDB={foodDB} /> : <div className="text-sm text-gray-500">Select a day to see entries.</div>}
+                    {calView.selectedDay ? <DayDetails date={calView.selectedDay} dayData={byDate[calView.selectedDay]} exerciseDB={normalizedExerciseDB} foodDB={foodDB} /> : <div className="text-sm text-gray-500">Select a day to see entries.</div>}
                   </Card>
                 </div>
               </div>
@@ -227,7 +246,7 @@ export default function App(){
         </Card>
       </>)}
 
-      {view==="gym" && <GymSection {...{exerciseDB,setExerciseDB,gymLog,setGymLog,topWeight}} onBack={()=>setView('home')} />}
+      {view==="gym" && <GymSection {...{exerciseDB: normalizedExerciseDB,setExerciseDB,gymLog,setGymLog,topWeight}} onBack={()=>setView('home')} />}
       {view==="nutrition" && <NutritionSection {...{foodDB,setFoodDB,nutritionLog,setNutritionLog}} onBack={()=>setView('home')} />}
       {view==="body" && <BodySection {...{bodyLog,setBodyLog,unit}} onBack={()=>setView('home')} />}
       {view==="settings" && <SettingsSection {...{unit,setUnit,goals,setGoals}} />}
@@ -251,6 +270,13 @@ function SummaryStat({ label, value, goal, color }){
   );
 }
 
+function TagChip({ tag }){
+  if(!tag) return null;
+  const color = TAG_COLOR[tag] || "#64748b";
+  const label = TAG_LABEL[tag] || tag;
+  return <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: color, color: "white" }}>{label}</span>;
+}
+
 function DayDetails({ date, dayData, exerciseDB, foodDB }){
   if(!dayData) return <div className="text-sm text-gray-500">No data for this day.</div>;
   const exName = (id)=> exerciseDB.find(e=>e.id===id)?.name || "-";
@@ -267,28 +293,68 @@ function DayDetails({ date, dayData, exerciseDB, foodDB }){
 }
 
 function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, onBack }){
-  const [exerciseName, setExerciseName] = React.useState("");
-  const [exerciseDBFilter, setExerciseDBFilter] = React.useState("");
-  const [filter, setFilter] = React.useState("");
-  const exName = (id)=> exerciseDB.find(e=>e.id===id)?.name || "-";
+  const exById = React.useMemo(()=>Object.fromEntries(exerciseDB.map(e=>[e.id,e])), [exerciseDB]);
 
-  // NEW: collapse states (default collapsed)
+  // --- Add workout form state (controlled) ---
+  const [dateValue, setDateValue] = React.useState(todayISO()); // reset to today only on mount of Gym
+  const [exerciseId, setExerciseId] = React.useState(exerciseDB[0]?.id || "");
+  const [sets, setSets] = React.useState("");
+  const [reps, setReps] = React.useState("");
+  const [weight, setWeight] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [tagFilter, setTagFilter] = React.useState(""); // "" means All
+
+  // Collapsible states
   const [collapsedDays, setCollapsedDays] = React.useState({});
   const [collapsedExercises, setCollapsedExercises] = React.useState({});
+  const [openTagEditor, setOpenTagEditor] = React.useState(null); // exerciseId | null
+
   const isDayCollapsed = (date) => collapsedDays[date] !== false;
   const toggleDay = (date) => setCollapsedDays(prev => ({ ...prev, [date]: !isDayCollapsed(date) }));
-  const keyForExercise = (date,eid) => `${date}|${eid}`;
-  const isExerciseCollapsed = (date,eid) => collapsedExercises[keyForExercise(date,eid)] !== false;
+  const exKey = (date,eid) => `${date}|${eid}`;
+  const isExerciseCollapsed = (date,eid) => collapsedExercises[exKey(date,eid)] !== false;
   const toggleExercise = (date,eid) => setCollapsedExercises(prev => {
-    const key = keyForExercise(date,eid);
-    const wasCollapsed = prev[key] !== false;
-    return { ...prev, [key]: !wasCollapsed };
+    const key = exKey(date,eid);
+    return { ...prev, [key]: !(prev[key] !== false) };
   });
 
+  // Exercise choices filtered by tag
+  const exerciseChoices = React.useMemo(()=>{
+    const list = tagFilter
+      ? exerciseDB.filter(e => Array.isArray(e.tags) && e.tags.includes(tagFilter))
+      : exerciseDB;
+    return list;
+  }, [exerciseDB, tagFilter]);
+
+  // Ensure current exerciseId is valid after filter changes
+  React.useEffect(()=>{
+    if(!exerciseChoices.find(e=>e.id===exerciseId)){
+      setExerciseId(exerciseChoices[0]?.id || "");
+    }
+  }, [tagFilter, exerciseDB]); // eslint-disable-line
+
   function handleExport(){
-    const rows = gymLog.map(r=>({date:r.date, exercise:exName(r.exerciseId), sets:r.sets, reps:r.reps, weight:r.weight, notes:r.notes||""}));
+    const rows = gymLog.map(r=>({date:r.date, exercise:exById[r.exerciseId]?.name || "-", sets:r.sets, reps:r.reps, weight:r.weight, notes:r.notes||""}));
     const csv = toCSV(rows, ["date","exercise","sets","reps","weight","notes"]);
     downloadText("gym-log.csv", csv);
+  }
+
+  function submitWorkout(e){
+    e.preventDefault();
+    if(!dateValue || !exerciseId) return;
+    const rec = { id: uid(), date: dateValue, exerciseId, sets: Number(sets)||0, reps: Number(reps)||0, weight: Number(weight)||0, notes: notes||"" };
+    setGymLog(p=>[rec, ...p]);
+    // Reset fields EXCEPT date (and keep selected exercise for convenience)
+    setSets(""); setReps(""); setWeight(""); setNotes("");
+  }
+
+  function toggleExerciseTag(exId, tagKey){
+    setExerciseDB(prev => prev.map(ex => {
+      if(ex.id !== exId) return ex;
+      const current = Array.isArray(ex.tags) ? ex.tags : [];
+      const exists = current.includes(tagKey);
+      return { ...ex, tags: exists ? current.filter(t=>t!==tagKey) : [...current, tagKey] };
+    }));
   }
 
   const groupedByDate = React.useMemo(()=>{
@@ -296,33 +362,41 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
     return Object.entries(map).map(([date, list])=>({ date, list })).sort((a,b)=>b.date.localeCompare(a.date));
   }, [gymLog]);
 
-  const filteredExerciseDB = React.useMemo(()=>{
-    const q = exerciseDBFilter.toLowerCase();
-    return exerciseDB.filter(ex => ex.name.toLowerCase().includes(q));
-  }, [exerciseDB, exerciseDBFilter]);
-
   return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
       <div className="xl:col-span-2">
         <Card title="Add workout entry" borderColor="#C29B2C" actions={<Button variant="outline" onClick={onBack}>Back</Button>}>
-          <form className="grid grid-cols-2 gap-3" onSubmit={(e)=>{
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            const rec = { id: uid(), date: fd.get("date"), exerciseId: fd.get("exerciseId"), sets: Number(fd.get("sets"))||0, reps: Number(fd.get("reps"))||0, weight: Number(fd.get("weight"))||0, notes: fd.get("notes")||"" };
-            setGymLog(p=>[rec, ...p]); e.currentTarget.reset();
-          }}>
-            <div className="col-span-2 md:col-span-1"><label className="text-xs text-gray-500">Date</label><Input type="date" name="date" required /></div>
-            <div className="col-span-2 md:col-span-1"><label className="text-xs text-gray-500">Exercise</label><select name="exerciseId" className="rounded-xl border px-3 py-2 text-sm w-full" required>{exerciseDB.map(e=>(<option key={e.id} value={e.id}>{e.name}</option>))}</select></div>
-            <div><label className="text-xs text-gray-500">Sets</label><NumberInput name="sets" min="0" /></div>
-            <div><label className="text-xs text-gray-500">Reps</label><NumberInput name="reps" min="0" /></div>
-            <div><label className="text-xs text-gray-500">Weight (kg)</label><NumberInput name="weight" min="0" /></div>
-            <div className="col-span-2"><label className="text-xs text-gray-500">Notes</label><Input name="notes" /></div>
+          <form className="grid grid-cols-2 gap-3" onSubmit={submitWorkout}>
+            <div className="col-span-2 md:col-span-1">
+              <label className="text-xs text-gray-500">Date</label>
+              <Input type="date" name="date" required value={dateValue} onChange={e=>setDateValue(e.target.value)} />
+            </div>
+            <div className="col-span-2 md:col-span-1">
+              <label className="text-xs text-gray-500">Filter by tag</label>
+              <select className="rounded-xl border px-3 py-2 text-sm w-full" value={tagFilter} onChange={e=>setTagFilter(e.target.value)}>
+                <option value="">All</option>
+                {TAGS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2 md:col-span-1">
+              <label className="text-xs text-gray-500">Exercise</label>
+              <select name="exerciseId" className="rounded-xl border px-3 py-2 text-sm w-full" required value={exerciseId} onChange={e=>setExerciseId(e.target.value)}>
+                {exerciseChoices.map(e=>(
+                  <option key={e.id} value={e.id}>
+                    {e.name}{Array.isArray(e.tags)&&e.tags.length? " · " + e.tags.map(t=>TAG_LABEL[t]||t).join(", ") : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div><label className="text-xs text-gray-500">Sets</label><NumberInput name="sets" min="0" value={sets} onChange={e=>setSets(e.target.value)} /></div>
+            <div><label className="text-xs text-gray-500">Reps</label><NumberInput name="reps" min="0" value={reps} onChange={e=>setReps(e.target.value)} /></div>
+            <div><label className="text-xs text-gray-500">Weight (kg)</label><NumberInput name="weight" min="0" value={weight} onChange={e=>setWeight(e.target.value)} /></div>
+            <div className="col-span-2"><label className="text-xs text-gray-500">Notes</label><Input name="notes" value={notes} onChange={e=>setNotes(e.target.value)} /></div>
             <div className="col-span-2"><Button type="submit">Add</Button></div>
           </form>
         </Card>
 
-        <Card title="Workout by day" borderColor="#C29B2C" actions={<Button variant="outline" onClick={handleExport}>Export CSV</Button>}>
-          <div className="mb-3"><Input placeholder="Search logged exercises..." value={filter} onChange={e=>setFilter(e.target.value)} /></div>
+        <Card title="Workout by day (collapsible)" borderColor="#C29B2C" actions={<Button variant="outline" onClick={handleExport}>Export CSV</Button>}>
           <div className="space-y-4">
             {groupedByDate.map(g => {
               // Group within day by exerciseId
@@ -332,9 +406,9 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                 if(!byExercise[key]) byExercise[key] = [];
                 byExercise[key].push(r);
               }
-              const groups = Object.entries(byExercise).map(([eid, items]) => ({ eid, name: exName(eid), items }))
-                .filter(grp => grp.name.toLowerCase().includes(filter.toLowerCase()))
-                .sort((a,b)=>a.name.localeCompare(b.name));
+              const groups = Object.entries(byExercise).map(([eid, items]) => ({ eid, items, ex: exById[eid] })).sort((a,b)=>{
+                const an=(a.ex?.name||"").toLowerCase(), bn=(b.ex?.name||"").toLowerCase(); return an.localeCompare(bn);
+              });
 
               const collapsed = isDayCollapsed(g.date);
               const totalExercises = groups.length;
@@ -362,13 +436,23 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                         const eCollapsed = isExerciseCollapsed(g.date, grp.eid);
                         const best = Math.max(0, ...grp.items.map(r=>Number(r.weight)||0));
                         const setCount = grp.items.reduce((a,b)=>a+(Number(b.sets)||0),0);
+                        const exTags = Array.isArray(grp.ex?.tags) ? grp.ex.tags : [];
                         return (
                           <div key={grp.eid} className="rounded-lg border">
                             <div className="flex items-center justify-between px-3 py-2 bg-yellow-50">
-                              <div className="font-medium">{grp.name}</div>
-                              <div className="flex items-center gap-3 text-xs text-gray-600">
+                              <div className="flex items-center gap-2">
+                                <div className="font-medium">{grp.ex?.name || "-"}</div>
+                                <div className="flex gap-1">{exTags.map(t => <TagChip key={t} tag={t} />)}</div>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-gray-600">
                                 <span>{setCount} sets</span>
                                 <span>· PR {best} kg</span>
+                                {/* Tag edit icon */}
+                                <button
+                                  title="Edit tags"
+                                  onClick={()=>setOpenTagEditor(openTagEditor===grp.eid ? null : grp.eid)}
+                                  className="h-7 w-7 rounded-full border hover:bg-gray-100 text-gray-500"
+                                >🏷️</button>
                                 <button
                                   onClick={()=>toggleExercise(g.date, grp.eid)}
                                   className="h-7 w-7 rounded-full border hover:bg-gray-100"
@@ -377,6 +461,23 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                                 >{eCollapsed ? "▸" : "▾"}</button>
                               </div>
                             </div>
+
+                            {/* Tag picker popover */}
+                            {openTagEditor===grp.eid && (
+                              <div className="px-3 py-2 border-t bg-white text-sm">
+                                <div className="flex flex-wrap gap-3">
+                                  {TAGS.map(t => {
+                                    const checked = exTags.includes(t.key);
+                                    return (
+                                      <label key={t.key} className="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" checked={checked} onChange={()=>toggleExerciseTag(grp.eid, t.key)} />
+                                        <span className="px-2 py-0.5 rounded-full text-xs text-white" style={{ background:t.color }}>{t.label}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
 
                             {!eCollapsed && (
                               <div className="overflow-x-auto">
@@ -402,7 +503,7 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                           </div>
                         );
                       })}
-                      {groups.length===0 && <div className="text-sm text-gray-500">No matches</div>}
+                      {groups.length===0 && <div className="text-sm text-gray-500">No exercises</div>}
                     </div>
                   )}
                 </div>
@@ -414,22 +515,63 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
 
       <div>
         <Card title="Exercise database" borderColor="#C29B2C">
-          <div className="flex gap-2 mb-3">
-            <Input placeholder="Exercise name" value={exerciseName} onChange={e=>setExerciseName(e.target.value)} />
-            <Button onClick={()=>{ if(!exerciseName) return; setExerciseDB(p=>[{id:uid(), name:exerciseName}, ...p]); setExerciseName(""); }}>Add</Button>
-          </div>
-          <div className="mb-2"><Input placeholder="Search exercises..." value={exerciseDBFilter} onChange={e=>setExerciseDBFilter(e.target.value)} /></div>
-          <ul className="space-y-2">
-            {filteredExerciseDB.map(ex=>(
-              <li key={ex.id} className="flex items-center justify-between rounded-xl border px-3 py-2">
-                <span>{ex.name}</span>
-                <Button variant="outline" onClick={()=>setExerciseDB(p=>p.filter(x=>x.id!==ex.id))}>Remove</Button>
-              </li>
-            ))}
-            {filteredExerciseDB.length===0 && <li className="text-sm text-gray-500">No matches</li>}
-          </ul>
+          <ExerciseDBPanel exerciseDB={exerciseDB} setExerciseDB={setExerciseDB} />
         </Card>
       </div>
+    </div>
+  );
+}
+
+function ExerciseDBPanel({ exerciseDB, setExerciseDB }){
+  const [exerciseName, setExerciseName] = React.useState("");
+  const [exerciseDBFilter, setExerciseDBFilter] = React.useState("");
+
+  const filteredExerciseDB = React.useMemo(()=>{
+    const q = exerciseDBFilter.toLowerCase();
+    return exerciseDB.filter(ex => (ex.name||"").toLowerCase().includes(q));
+  }, [exerciseDB, exerciseDBFilter]);
+
+  function toggleExerciseTag(exId, tagKey){
+    setExerciseDB(prev => prev.map(ex => {
+      if(ex.id !== exId) return ex;
+      const current = Array.isArray(ex.tags) ? ex.tags : [];
+      const exists = current.includes(tagKey);
+      return { ...ex, tags: exists ? current.filter(t=>t!==tagKey) : [...current, tagKey] };
+    }));
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-3">
+        <Input placeholder="Exercise name" value={exerciseName} onChange={e=>setExerciseName(e.target.value)} />
+        <Button onClick={()=>{ if(!exerciseName) return; setExerciseDB(p=>[{id:uid(), name:exerciseName, tags:[]}, ...p]); setExerciseName(""); }}>Add</Button>
+      </div>
+      <div className="mb-2"><Input placeholder="Search exercises..." value={exerciseDBFilter} onChange={e=>setExerciseDBFilter(e.target.value)} /></div>
+      <ul className="space-y-2">
+        {filteredExerciseDB.map(ex=>(
+          <li key={ex.id} className="rounded-xl border px-3 py-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">{ex.name}</span>
+              <button className="h-7 w-7 rounded-full border hover:bg-gray-50 text-gray-500" title="Edit tags"
+                onClick={()=>toggleExerciseTag(ex.id, "_panelToggle")}
+                style={{ display: "none" }}
+              >🏷️</button>
+            </div>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              {TAGS.map(t => {
+                const checked = Array.isArray(ex.tags) && ex.tags.includes(t.key);
+                return (
+                  <label key={t.key} className="flex items-center gap-2 cursor-pointer text-xs">
+                    <input type="checkbox" checked={!!checked} onChange={()=>toggleExerciseTag(ex.id, t.key)} />
+                    <span className="px-2 py-0.5 rounded-full text-white" style={{ background:t.color }}>{t.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </li>
+        ))}
+        {filteredExerciseDB.length===0 && <li className="text-sm text-gray-500">No matches</li>}
+      </ul>
     </div>
   );
 }
@@ -509,32 +651,48 @@ function NutritionSection({ foodDB, setFoodDB, nutritionLog, setNutritionLog, on
 
       <div>
         <Card title="Food database" borderColor="#16a34a">
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <Input placeholder="Name" value={food.name} onChange={e=>setFood({...food, name: e.target.value})} />
-            <NumberInput placeholder="Calories" value={food.calories} onChange={e=>setFood({...food, calories: e.target.value})} />
-            <NumberInput placeholder="Protein" value={food.protein} onChange={e=>setFood({...food, protein: e.target.value})} />
-            <NumberInput placeholder="Carbs" value={food.carbs} onChange={e=>setFood({...food, carbs: e.target.value})} />
-            <NumberInput placeholder="Fat" value={food.fat} onChange={e=>setFood({...food, fat: e.target.value})} />
-          </div>
-          <div className="flex gap-2 mb-3">
-            <Button onClick={()=>{
-              if(!food.name) return;
-              setFoodDB(p=>[{ id: uid(), name: food.name, calories: Number(food.calories)||0, protein: Number(food.protein)||0, carbs: Number(food.carbs)||0, fat: Number(food.fat)||0 }, ...p]);
-              setFood({ name:"", calories:"", protein:"", carbs:"", fat:"" });
-            }}>Add</Button>
-          </div>
-          <div className="mb-2"><Input placeholder="Search foods..." value={foodFilter} onChange={e=>setFoodFilter(e.target.value)} /></div>
-          <ul className="space-y-2">
-            {filteredFoodDB.map(f=>(
-              <li key={f.id} className="flex items-center justify-between rounded-xl border px-3 py-2">
-                <span>{f.name} · {f.calories} kcal · {f.protein} g protein</span>
-                <Button variant="outline" onClick={()=>setFoodDB(p=>p.filter(x=>x.id!==f.id))}>Remove</Button>
-              </li>
-            ))}
-            {filteredFoodDB.length===0 && <li className="text-sm text-gray-500">No matches</li>}
-          </ul>
+          <FoodDBPanel foodDB={foodDB} setFoodDB={setFoodDB} />
         </Card>
       </div>
+    </div>
+  );
+}
+
+function FoodDBPanel({ foodDB, setFoodDB }){
+  const [food, setFood] = React.useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const [foodFilter, setFoodFilter] = React.useState("");
+
+  const filteredFoodDB = React.useMemo(()=>{
+    const q = foodFilter.toLowerCase();
+    return foodDB.filter(f => f.name.toLowerCase().includes(q));
+  }, [foodDB, foodFilter]);
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <Input placeholder="Name" value={food.name} onChange={e=>setFood({...food, name: e.target.value})} />
+        <NumberInput placeholder="Calories" value={food.calories} onChange={e=>setFood({...food, calories: e.target.value})} />
+        <NumberInput placeholder="Protein" value={food.protein} onChange={e=>setFood({...food, protein: e.target.value})} />
+        <NumberInput placeholder="Carbs" value={food.carbs} onChange={e=>setFood({...food, carbs: e.target.value})} />
+        <NumberInput placeholder="Fat" value={food.fat} onChange={e=>setFood({...food, fat: e.target.value})} />
+      </div>
+      <div className="flex gap-2 mb-3">
+        <Button onClick={()=>{
+          if(!food.name) return;
+          setFoodDB(p=>[{ id: uid(), name: food.name, calories: Number(food.calories)||0, protein: Number(food.protein)||0, carbs: Number(food.carbs)||0, fat: Number(food.fat)||0 }, ...p]);
+          setFood({ name:"", calories:"", protein:"", carbs:"", fat:"" });
+        }}>Add</Button>
+      </div>
+      <div className="mb-2"><Input placeholder="Search foods..." value={foodFilter} onChange={e=>setFoodFilter(e.target.value)} /></div>
+      <ul className="space-y-2">
+        {filteredFoodDB.map(f=>(
+          <li key={f.id} className="flex items-center justify-between rounded-xl border px-3 py-2">
+            <span>{f.name} · {f.calories} kcal · {f.protein} g protein</span>
+            <Button variant="outline" onClick={()=>setFoodDB(p=>p.filter(x=>x.id!==f.id))}>Remove</Button>
+          </li>
+        ))}
+        {filteredFoodDB.length===0 && <li className="text-sm text-gray-500">No matches</li>}
+      </ul>
     </div>
   );
 }
@@ -578,8 +736,8 @@ function BodySection({ bodyLog, setBodyLog, unit, onBack }){
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
                 <Line type="monotone" dataKey="weight" stroke="#2563eb" name={"Weight ("+(unit==="imperial"?"lb":"kg")+")"} />
-                <Line type="monotone" dataKey="fat" stroke="#1e3a8a" name="Fat %" />
-                <Line type="monotone" dataKey="muscle" stroke="#60a5fa" name="Muscle %" />
+                <Line type="monotone" dataKey="fat" stroke={"#1e3a8a"} name="Fat %" />
+                <Line type="monotone" dataKey="muscle" stroke={"#60a5fa"} name="Muscle %" />
               </LineChart>
             </ResponsiveContainer>
           </div>
