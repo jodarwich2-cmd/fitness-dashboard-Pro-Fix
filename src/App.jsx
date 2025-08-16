@@ -6,30 +6,18 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 function cn(...a){ return a.filter(Boolean).join(" "); }
 const COLORS = { gym: "#C29B2C", nutrition: "#16a34a", body: "#2563eb" };
-const GREEN700 = "#15803d"; // tailwind text-green-700
+const GREEN700 = "#15803d"; // tailwind green-700
 
 // Plan window for progress bar
 const PLAN_START = new Date(2025, 6, 1); // July=6
 const PLAN_END = new Date(2026, 9, 8);   // Oct=9
-
-function toLocalISO(d){
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-}
-
-function weeksBetweenInclusive(start, end){
-  const MS = 24*60*60*1000;
-  const days = Math.floor((end - start) / MS) + 1;
-  return Math.ceil(days / 7);
-}
 
 export default function App(){
   const [view, setView] = React.useState("home");
   const [unit, setUnit] = useLocalStorageState("unitPref", "metric");
   const [goals, setGoals] = useLocalStorageState("goals", { calories: 2200, protein: 180, weight: 80 });
 
+  // === DATA (keys unchanged so your existing data remains) ===
   const [exerciseDB, setExerciseDB] = useLocalStorageState("exDB", [
     { id: uid(), name: "Bench Press" }, { id: uid(), name: "Squat" }, { id: uid(), name: "Lat Pulldown" }
   ]);
@@ -37,7 +25,6 @@ export default function App(){
     { id: uid(), name: "Chicken breast 100g", calories: 165, protein: 31, carbs: 0, fat: 3.6 },
     { id: uid(), name: "Egg 1x", calories: 78, protein: 6, carbs: 0.6, fat: 5 }
   ]);
-
   const [gymLog, setGymLog] = useLocalStorageState("gymLog", []);
   const [nutritionLog, setNutritionLog] = useLocalStorageState("nutritionLog", []);
   const [bodyLog, setBodyLog] = useLocalStorageState("bodyLog", []);
@@ -57,24 +44,20 @@ export default function App(){
   const hasDataDates = React.useMemo(()=> new Set(Object.keys(byDate)), [byDate]);
 
   // === OVERVIEW CHART DATA ===
-  // Volume by date
   const gymVolumeByDate = React.useMemo(()=>{
     const temp={}; for(const r of gymLog){ const k=r.date; const vol=(Number(r.sets)||0)*(Number(r.reps)||0)*(Number(r.weight)||0); temp[k]=(temp[k]||0)+vol; }
     return Object.entries(temp).map(([date,volume])=>({date, volume})).sort((a,b)=>a.date.localeCompare(b.date));
   }, [gymLog]);
-  // Max weight by date (overall top weight used on each day)
   const gymMaxWeightByDate = React.useMemo(()=>{
     const temp={}; for(const r of gymLog){ const k=r.date; temp[k] = Math.max(temp[k]||0, Number(r.weight)||0); }
     return Object.entries(temp).map(([date,maxWeight])=>({date, maxWeight})).sort((a,b)=>a.date.localeCompare(b.date));
   }, [gymLog]);
 
-  const [gymOverviewMetric, setGymOverviewMetric] = React.useState("max"); // "max" | "volume"
-
+  const [gymOverviewMetric, setGymOverviewMetric] = React.useState("max");
   const nutriByDate = React.useMemo(()=>{
     const temp={}; for(const r of nutritionLog){ const k=r.date; if(!temp[k]) temp[k]={calories:0,protein:0}; temp[k].calories+=Number(r.calories)||0; temp[k].protein+=Number(r.protein)||0; }
     return Object.entries(temp).map(([date,v])=>({date, ...v})).sort((a,b)=>a.date.localeCompare(b.date));
   }, [nutritionLog]);
-
   const bodyByDate = React.useMemo(()=>[...bodyLog].sort((a,b)=>a.date.localeCompare(b.date)), [bodyLog]);
 
   const insights = React.useMemo(()=>{
@@ -93,18 +76,17 @@ export default function App(){
 
   // === PLAN PROGRESS BAR ===
   const plan = React.useMemo(()=>{
-    // Count unique gym dates within plan range
     const start = PLAN_START;
     const end = PLAN_END;
     const uniq = new Set();
     for(const r of gymLog){
-      const dParts = r.date.split("-").map(n=>Number(n));
-      if(dParts.length===3){
-        const d = new Date(dParts[0], dParts[1]-1, dParts[2]);
+      const [yy,mm,dd] = (r.date||"").split("-").map(Number);
+      if(yy && mm && dd){
+        const d = new Date(yy, mm-1, dd);
         if(d >= start && d <= end){ uniq.add(r.date); }
       }
     }
-    const weeks = weeksBetweenInclusive(start, end);
+    const weeks = Math.ceil(((end - start) / (24*60*60*1000) + 1)/7);
     const target = weeks * 3;
     const actual = uniq.size;
     const pct = target>0 ? (actual/target)*100 : 0;
@@ -135,24 +117,15 @@ export default function App(){
       </Header>
 
       {view==="home" && (<>
-        {/* Progress bar card, visually independent from the calendar */}
         <Card title="Days untill 30">
           <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
             <div>3 days/week · Jul 1, 2025 → Oct 8, 2026</div>
             <div>{plan.actual} / {plan.target} ({Math.round(plan.pct)}%)</div>
           </div>
           <div className="w-full h-6 rounded-xl bg-gray-200 overflow-hidden border">
-            <div
-              className="h-6"
-              style={{ width: Math.min(100, plan.pct) + "%", background: GREEN700 }}
-              title="Planned progress"
-            />
+            <div className="h-6" style={{ width: Math.min(100, plan.pct) + "%", background: GREEN700 }} />
             {plan.pct>100 && (
-              <div
-                className="h-6 -mt-6 opacity-80"
-                style={{ width: "100%", background: "repeating-linear-gradient(45deg, rgba(21,128,61,0.2), rgba(21,128,61,0.2) 8px, rgba(21,128,61,0.35) 8px, rgba(21,128,61,0.35) 16px)" }}
-                title="Over plan"
-              />
+              <div className="h-6 -mt-6 opacity-80" style={{ width: "100%", background: "repeating-linear-gradient(45deg, rgba(21,128,61,0.2), rgba(21,128,61,0.2) 8px, rgba(21,128,61,0.35) 8px, rgba(21,128,61,0.35) 16px)" }} />
             )}
           </div>
         </Card>
@@ -161,22 +134,12 @@ export default function App(){
           title="Calendar"
           actions={
             <div className="flex items-center gap-2">
-              {calView.mode==="month" && (
-                <Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back</Button>
-              )}
+              {calView.mode==="month" && (<Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back</Button>)}
               {calView.mode==="year" && (
                 <div className="flex items-center gap-2">
-                  <button
-                    aria-label="Previous year"
-                    onClick={()=>setCalView(v=>({...v, year: v.year-1}))}
-                    className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50"
-                  >‹</button>
+                  <button aria-label="Previous year" onClick={()=>setCalView(v=>({...v, year: v.year-1}))} className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50">‹</button>
                   <div className="text-sm text-gray-600 w-16 text-center">{calView.year}</div>
-                  <button
-                    aria-label="Next year"
-                    onClick={()=>setCalView(v=>({...v, year: v.year+1}))}
-                    className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50"
-                  >›</button>
+                  <button aria-label="Next year" onClick={()=>setCalView(v=>({...v, year: v.year+1}))} className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50">›</button>
                 </div>
               )}
             </div>
@@ -206,31 +169,16 @@ export default function App(){
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
-          <Card
-            title="Gym Progress"
-            borderColor={COLORS.gym}
-            actions={
-              <div className="flex items-center gap-2">
-                <Select
-                  value={gymOverviewMetric}
-                  onChange={setGymOverviewMetric}
-                  options={[
-                    { value: "max", label: "Max Weight" },
-                    { value: "volume", label: "Volume" },
-                  ]}
-                />
-                <Button variant="outline" onClick={()=>setView("gym")}>Open</Button>
-              </div>
-            }
-          >
+          <Card title="Gym Progress" borderColor={COLORS.gym} actions={
+            <div className="flex items-center gap-2">
+              <Select value={gymOverviewMetric} onChange={setGymOverviewMetric} options={[{ value: "max", label: "Max Weight" },{ value: "volume", label: "Volume" }]} />
+              <Button variant="outline" onClick={()=>setView("gym")}>Open</Button>
+            </div>
+          }>
             <div className="h-64 cursor-pointer" onClick={()=>setView("gym")}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={gymOverviewMetric==="max" ? gymMaxWeightByDate : gymVolumeByDate}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
+                  <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
                   {gymOverviewMetric==="max"
                     ? <Line type="monotone" dataKey="maxWeight" stroke={COLORS.gym} name="Max Weight (any exercise)" />
                     : <Line type="monotone" dataKey="volume" stroke={COLORS.gym} name="Volume" />}
@@ -243,11 +191,7 @@ export default function App(){
             <div className="h-64 cursor-pointer" onClick={()=>setView("nutrition")}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={nutriByDate}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
+                  <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
                   <Line type="monotone" dataKey="calories" stroke={COLORS.nutrition} name="Calories" />
                   <Line type="monotone" dataKey="protein" stroke={"#065f46"} name="Protein" />
                 </LineChart>
@@ -259,11 +203,7 @@ export default function App(){
             <div className="h-64 cursor-pointer" onClick={()=>setView("body")}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={bodyByDate}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
+                  <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
                   <Line type="monotone" dataKey="weight" stroke={COLORS.body} name="Weight" />
                   <Line type="monotone" dataKey="fat" stroke={"#1e3a8a"} name="Fat %" />
                   <Line type="monotone" dataKey="muscle" stroke={"#60a5fa"} name="Muscle %" />
@@ -277,11 +217,7 @@ export default function App(){
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={insights}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
+                <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
                 <Line type="monotone" dataKey="gymVolume" stroke={COLORS.gym} name="Gym Volume" />
                 <Line type="monotone" dataKey="calories" stroke={COLORS.nutrition} name="Calories" />
                 <Line type="monotone" dataKey="weight" stroke={COLORS.body} name="Weight" />
@@ -318,7 +254,6 @@ function SummaryStat({ label, value, goal, color }){
 function DayDetails({ date, dayData, exerciseDB, foodDB }){
   if(!dayData) return <div className="text-sm text-gray-500">No data for this day.</div>;
   const exName = (id)=> exerciseDB.find(e=>e.id===id)?.name || "-";
-  const foodName = (id)=> foodDB.find(f=>f.id===id)?.name || "-";
   return (
     <div className="space-y-3 text-sm">
       <div><span className="font-semibold">Calories:</span> {dayData.calories} · <span className="font-semibold">Protein:</span> {dayData.protein} g</div>
@@ -336,6 +271,19 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
   const [exerciseDBFilter, setExerciseDBFilter] = React.useState("");
   const [filter, setFilter] = React.useState("");
   const exName = (id)=> exerciseDB.find(e=>e.id===id)?.name || "-";
+
+  // NEW: collapse states (default collapsed)
+  const [collapsedDays, setCollapsedDays] = React.useState({});
+  const [collapsedExercises, setCollapsedExercises] = React.useState({});
+  const isDayCollapsed = (date) => collapsedDays[date] !== false;
+  const toggleDay = (date) => setCollapsedDays(prev => ({ ...prev, [date]: !isDayCollapsed(date) }));
+  const keyForExercise = (date,eid) => `${date}|${eid}`;
+  const isExerciseCollapsed = (date,eid) => collapsedExercises[keyForExercise(date,eid)] !== false;
+  const toggleExercise = (date,eid) => setCollapsedExercises(prev => {
+    const key = keyForExercise(date,eid);
+    const wasCollapsed = prev[key] !== false;
+    return { ...prev, [key]: !wasCollapsed };
+  });
 
   function handleExport(){
     const rows = gymLog.map(r=>({date:r.date, exercise:exName(r.exerciseId), sets:r.sets, reps:r.reps, weight:r.weight, notes:r.notes||""}));
@@ -387,36 +335,76 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
               const groups = Object.entries(byExercise).map(([eid, items]) => ({ eid, name: exName(eid), items }))
                 .filter(grp => grp.name.toLowerCase().includes(filter.toLowerCase()))
                 .sort((a,b)=>a.name.localeCompare(b.name));
+
+              const collapsed = isDayCollapsed(g.date);
+              const totalExercises = groups.length;
+              const totalSets = groups.reduce((sum, grp) => sum + grp.items.reduce((a,b)=>a+(Number(b.sets)||0),0), 0);
+
               return (
-                <div key={g.date} className="rounded-xl border p-3">
-                  <div className="font-semibold mb-2">{g.date}</div>
-                  <div className="space-y-3">
-                    {groups.map(grp => (
-                      <div key={grp.eid} className="rounded-lg border">
-                        <div className="px-3 py-2 font-medium bg-yellow-50">{grp.name}</div>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-sm">
-                            <thead><tr className="text-left text-gray-500">
-                              <th className="py-2 pr-2">Sets</th><th className="py-2 pr-2">Reps</th><th className="py-2 pr-2">Weight</th><th className="py-2 pr-2">Notes</th><th className="py-2 pr-2">PR</th><th className="py-2 pr-2">Actions</th>
-                            </tr></thead>
-                            <tbody>
-                              {grp.items.map(r => (
-                                <tr key={r.id} className="border-t">
-                                  <td className="py-2 pr-2">{r.sets}</td>
-                                  <td className="py-2 pr-2">{r.reps}</td>
-                                  <td className="py-2 pr-2">{r.weight}</td>
-                                  <td className="py-2 pr-2">{r.notes}</td>
-                                  <td className="py-2 pr-2">{(topWeight[r.exerciseId]||0)===r.weight ? <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">PR</span> : ""}</td>
-                                  <td className="py-2 pr-2"><Button variant="outline" onClick={()=>setGymLog(p=>p.filter(x=>x.id!==r.id))}>Delete</Button></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
-                    {groups.length===0 && <div className="text-sm text-gray-500">No matches</div>}
+                <div key={g.date} className="rounded-xl border">
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <div className="font-semibold">{g.date}</div>
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                      <span>{totalExercises} exercises</span>
+                      <span>· {totalSets} sets</span>
+                      <button
+                        onClick={()=>toggleDay(g.date)}
+                        className="h-7 w-7 rounded-full border hover:bg-gray-50 text-gray-600"
+                        aria-expanded={!collapsed}
+                        aria-label={collapsed ? "Expand day" : "Collapse day"}
+                      >{collapsed ? "▸" : "▾"}</button>
+                    </div>
                   </div>
+
+                  {!collapsed && (
+                    <div className="p-3 space-y-3 border-t">
+                      {groups.map(grp => {
+                        const eCollapsed = isExerciseCollapsed(g.date, grp.eid);
+                        const best = Math.max(0, ...grp.items.map(r=>Number(r.weight)||0));
+                        const setCount = grp.items.reduce((a,b)=>a+(Number(b.sets)||0),0);
+                        return (
+                          <div key={grp.eid} className="rounded-lg border">
+                            <div className="flex items-center justify-between px-3 py-2 bg-yellow-50">
+                              <div className="font-medium">{grp.name}</div>
+                              <div className="flex items-center gap-3 text-xs text-gray-600">
+                                <span>{setCount} sets</span>
+                                <span>· PR {best} kg</span>
+                                <button
+                                  onClick={()=>toggleExercise(g.date, grp.eid)}
+                                  className="h-7 w-7 rounded-full border hover:bg-gray-100"
+                                  aria-expanded={!eCollapsed}
+                                  aria-label={eCollapsed ? "Expand exercise" : "Collapse exercise"}
+                                >{eCollapsed ? "▸" : "▾"}</button>
+                              </div>
+                            </div>
+
+                            {!eCollapsed && (
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                  <thead><tr className="text-left text-gray-500">
+                                    <th className="py-2 pr-2">Sets</th><th className="py-2 pr-2">Reps</th><th className="py-2 pr-2">Weight</th><th className="py-2 pr-2">Notes</th><th className="py-2 pr-2">PR</th><th className="py-2 pr-2">Actions</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {grp.items.map(r => (
+                                      <tr key={r.id} className="border-t">
+                                        <td className="py-2 pr-2">{r.sets}</td>
+                                        <td className="py-2 pr-2">{r.reps}</td>
+                                        <td className="py-2 pr-2">{r.weight}</td>
+                                        <td className="py-2 pr-2">{r.notes}</td>
+                                        <td className="py-2 pr-2">{(topWeight[r.exerciseId]||0)===r.weight ? <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">PR</span> : ""}</td>
+                                        <td className="py-2 pr-2"><Button variant="outline" onClick={()=>setGymLog(p=>p.filter(x=>x.id!==r.id))}>Delete</Button></td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {groups.length===0 && <div className="text-sm text-gray-500">No matches</div>}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -454,44 +442,6 @@ function NutritionSection({ foodDB, setFoodDB, nutritionLog, setNutritionLog, on
     const rows = nutritionLog.map(r=>({date:r.date, food:(foodDB.find(f=>f.id===r.foodId)?.name||"-"), qty:r.qty, calories:r.calories, protein:r.protein, notes:r.notes||""}));
     const csv = toCSV(rows, ["date","food","qty","calories","protein","notes"]);
     downloadText("nutrition-log.csv", csv);
-  }
-
-  function importFoodsFromJSON(e){
-    const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        // Accept several possible shapes
-        const arr = Array.isArray(data) ? data
-                  : Array.isArray(data.foods) ? data.foods
-                  : Array.isArray(data.foodDB) ? data.foodDB
-                  : [];
-        if(arr.length===0){ alert("No foods found in this file."); e.target.value=""; return; }
-        let count=0;
-        setFoodDB(prev => {
-          const existingNames = new Set(prev.map(f=>f.name.toLowerCase().trim()));
-          const merged = [...prev];
-          for(const item of arr){
-            const name = (item.name || item.food || "").toString().trim();
-            if(!name || existingNames.has(name.toLowerCase())) continue;
-            const calories = Number(item.calories ?? item.kcal ?? 0) || 0;
-            const protein = Number(item.protein ?? item.proteins ?? 0) || 0;
-            const carbs = Number(item.carbs ?? item.carbohydrates ?? 0) || 0;
-            const fat = Number(item.fat ?? item.fats ?? 0) || 0;
-            merged.push({ id: uid(), name, calories, protein, carbs, fat });
-            existingNames.add(name.toLowerCase());
-            count++;
-          }
-          return merged;
-        });
-        alert("Imported foods: " + count);
-      } catch {
-        alert("Invalid JSON file.");
-      }
-      e.target.value="";
-    };
-    reader.readAsText(file);
   }
 
   const grouped = React.useMemo(()=>{
@@ -558,14 +508,7 @@ function NutritionSection({ foodDB, setFoodDB, nutritionLog, setNutritionLog, on
       </div>
 
       <div>
-        <Card title="Food database" borderColor="#16a34a" actions={
-          <div className="flex items-center gap-2">
-            <label className="px-3 py-2 text-sm rounded-xl border cursor-pointer bg-white hover:bg-gray-50">
-              Import Foods (JSON)
-              <input type="file" accept="application/json" onChange={importFoodsFromJSON} className="hidden" />
-            </label>
-          </div>
-        }>
+        <Card title="Food database" borderColor="#16a34a">
           <div className="grid grid-cols-2 gap-2 mb-3">
             <Input placeholder="Name" value={food.name} onChange={e=>setFood({...food, name: e.target.value})} />
             <NumberInput placeholder="Calories" value={food.calories} onChange={e=>setFood({...food, calories: e.target.value})} />
