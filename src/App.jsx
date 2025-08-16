@@ -6,6 +6,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 function cn(...a){ return a.filter(Boolean).join(" "); }
 const COLORS = { gym: "#C29B2C", nutrition: "#16a34a", body: "#2563eb" };
+const GREEN700 = "#15803d"; // tailwind text-green-700
 
 // Plan window for progress bar
 const PLAN_START = new Date(2025, 6, 1); // July=6
@@ -95,7 +96,6 @@ export default function App(){
     // Count unique gym dates within plan range
     const start = PLAN_START;
     const end = PLAN_END;
-    const MS = 24*60*60*1000;
     const uniq = new Set();
     for(const r of gymLog){
       const dParts = r.date.split("-").map(n=>Number(n));
@@ -135,46 +135,52 @@ export default function App(){
       </Header>
 
       {view==="home" && (<>
+        {/* Progress bar card, visually independent from the calendar */}
+        <Card title="Days untill 30">
+          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+            <div>3 days/week · Jul 1, 2025 → Oct 8, 2026</div>
+            <div>{plan.actual} / {plan.target} ({Math.round(plan.pct)}%)</div>
+          </div>
+          <div className="w-full h-6 rounded-xl bg-gray-200 overflow-hidden border">
+            <div
+              className="h-6"
+              style={{ width: Math.min(100, plan.pct) + "%", background: GREEN700 }}
+              title="Planned progress"
+            />
+            {plan.pct>100 && (
+              <div
+                className="h-6 -mt-6 opacity-80"
+                style={{ width: "100%", background: "repeating-linear-gradient(45deg, rgba(21,128,61,0.2), rgba(21,128,61,0.2) 8px, rgba(21,128,61,0.35) 8px, rgba(21,128,61,0.35) 16px)" }}
+                title="Over plan"
+              />
+            )}
+          </div>
+        </Card>
+
         <Card
           title="Calendar"
           actions={
             <div className="flex items-center gap-2">
-              {calView.mode==="month" && <Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back to Year</Button>}
-              {calView.mode==="year" && (<>
-                <Button variant="outline" onClick={()=>setCalView(v=>({...v, year: v.year-1}))}>◀ Year</Button>
-                <div className="text-sm text-gray-500">{calView.year}</div>
-                <Button variant="outline" onClick={()=>setCalView(v=>({...v, year: v.year+1}))}>Year ▶</Button>
-              </>)}
-            </div>
-          }>
-          {/* Plan progress bar (25% of calendar height visually -> give a generous height) */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-              <div>Gym Plan Progress (3 days/week · Jul 1, 2025 → Oct 8, 2026)</div>
-              <div>{plan.actual} / {plan.target} ({Math.round(plan.pct)}%)</div>
-            </div>
-            <div className="w-full h-6 rounded-xl bg-gray-200 overflow-hidden border">
-              <div
-                className="h-6"
-                style={{
-                  width: Math.min(100, plan.pct) + "%",
-                  background: COLORS.gym
-                }}
-                title="Planned progress"
-              />
-              {plan.pct>100 && (
-                <div
-                  className="h-6 -mt-6 opacity-80"
-                  style={{
-                    width: "100%",
-                    background: "repeating-linear-gradient(45deg, rgba(194,155,44,0.2), rgba(194,155,44,0.2) 8px, rgba(194,155,44,0.35) 8px, rgba(194,155,44,0.35) 16px)"
-                  }}
-                  title="Over plan"
-                />
+              {calView.mode==="month" && (
+                <Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back</Button>
+              )}
+              {calView.mode==="year" && (
+                <div className="flex items-center gap-2">
+                  <button
+                    aria-label="Previous year"
+                    onClick={()=>setCalView(v=>({...v, year: v.year-1}))}
+                    className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50"
+                  >‹</button>
+                  <div className="text-sm text-gray-600 w-16 text-center">{calView.year}</div>
+                  <button
+                    aria-label="Next year"
+                    onClick={()=>setCalView(v=>({...v, year: v.year+1}))}
+                    className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50"
+                  >›</button>
+                </div>
               )}
             </div>
-          </div>
-
+          }>
           <div className="space-y-4">
             {calView.mode==="year" && <YearCalendar year={calView.year} hasDataDates={hasDataDates} onSelectMonth={(m)=>setCalView({...calView, mode:"month", month:m})} />}
             {calView.mode==="month" && (
