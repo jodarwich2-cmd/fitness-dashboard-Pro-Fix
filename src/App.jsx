@@ -18,7 +18,6 @@ const TAGS = [
   { key: "shoulders", label: "Shoulders", color: "#f59e0b" },
   { key: "core", label: "Core", color: "#22c55e" },
 ];
-
 const TAG_COLOR = Object.fromEntries(TAGS.map(t=>[t.key, t.color]));
 const TAG_LABEL = Object.fromEntries(TAGS.map(t=>[t.key, t.label]));
 
@@ -31,7 +30,7 @@ export default function App(){
   const [unit, setUnit] = useLocalStorageState("unitPref", "metric");
   const [goals, setGoals] = useLocalStorageState("goals", { calories: 2200, protein: 180, weight: 80 });
 
-  // === DATA (keys unchanged so your existing data remains) ===
+  // Data (keys unchanged)
   const [exerciseDB, setExerciseDB] = useLocalStorageState("exDB", [
     { id: uid(), name: "Bench Press", tags: ["chest"] },
     { id: uid(), name: "Squat", tags: ["legs"] },
@@ -45,7 +44,6 @@ export default function App(){
   const [nutritionLog, setNutritionLog] = useLocalStorageState("nutritionLog", []);
   const [bodyLog, setBodyLog] = useLocalStorageState("bodyLog", []);
 
-  // Normalize any existing exercises that don't have tags yet
   const normalizedExerciseDB = React.useMemo(()=>exerciseDB.map(e=>({ ...e, tags: Array.isArray(e.tags) ? e.tags : [] })), [exerciseDB]);
 
   const topWeight = React.useMemo(()=>{
@@ -62,7 +60,7 @@ export default function App(){
 
   const hasDataDates = React.useMemo(()=> new Set(Object.keys(byDate)), [byDate]);
 
-  // === OVERVIEW CHART DATA ===
+  // Charts
   const gymVolumeByDate = React.useMemo(()=>{
     const temp={}; for(const r of gymLog){ const k=r.date; const vol=(Number(r.sets)||0)*(Number(r.reps)||0)*(Number(r.weight)||0); temp[k]=(temp[k]||0)+vol; }
     return Object.entries(temp).map(([date,volume])=>({date, volume})).sort((a,b)=>a.date.localeCompare(b.date));
@@ -71,14 +69,12 @@ export default function App(){
     const temp={}; for(const r of gymLog){ const k=r.date; temp[k] = Math.max(temp[k]||0, Number(r.weight)||0); }
     return Object.entries(temp).map(([date,maxWeight])=>({date, maxWeight})).sort((a,b)=>a.date.localeCompare(b.date));
   }, [gymLog]);
-
   const [gymOverviewMetric, setGymOverviewMetric] = React.useState("max");
   const nutriByDate = React.useMemo(()=>{
     const temp={}; for(const r of nutritionLog){ const k=r.date; if(!temp[k]) temp[k]={calories:0,protein:0}; temp[k].calories+=Number(r.calories)||0; temp[k].protein+=Number(r.protein)||0; }
     return Object.entries(temp).map(([date,v])=>({date, ...v})).sort((a,b)=>a.date.localeCompare(b.date));
   }, [nutritionLog]);
   const bodyByDate = React.useMemo(()=>[...bodyLog].sort((a,b)=>a.date.localeCompare(b.date)), [bodyLog]);
-
   const insights = React.useMemo(()=>{
     const map={};
     for(const r of gymVolumeByDate) map[r.date]={date:r.date,gymVolume:r.volume,calories:0,weight:null};
@@ -93,7 +89,7 @@ export default function App(){
   const todayVol = (gymVolumeByDate.find(x=>x.date===today)?.volume) || 0;
   const latestWeight = bodyByDate.length ? bodyByDate[bodyByDate.length-1].weight : null;
 
-  // === PLAN PROGRESS BAR ===
+  // Plan progress
   const plan = React.useMemo(()=>{
     const start = PLAN_START;
     const end = PLAN_END;
@@ -127,7 +123,10 @@ export default function App(){
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8">
-      <Header current={view} onNavigate={setView}>
+      <Header current={view} onNavigate={(v)=>{
+        // When leaving Gym and coming back, the gym form's date resets (handled inside GymSection mount).
+        setView(v);
+      }}>
         <Button variant="outline" onClick={backupJSON}>Backup JSON</Button>
         <label className="px-3 py-2 text-sm rounded-xl border cursor-pointer bg-white hover:bg-gray-50">
           Restore JSON
@@ -149,20 +148,7 @@ export default function App(){
           </div>
         </Card>
 
-        <Card
-          title="Calendar"
-          actions={
-            <div className="flex items-center gap-2">
-              {calView.mode==="month" && (<Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back</Button>)}
-              {calView.mode==="year" && (
-                <div className="flex items-center gap-2">
-                  <button aria-label="Previous year" onClick={()=>setCalView(v=>({...v, year: v.year-1}))} className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50">‹</button>
-                  <div className="text-sm text-gray-600 w-16 text-center">{calView.year}</div>
-                  <button aria-label="Next year" onClick={()=>setCalView(v=>({...v, year: v.year+1}))} className="h-8 w-8 rounded-full border text-gray-600 hover:bg-gray-50">›</button>
-                </div>
-              )}
-            </div>
-          }>
+        <Card title="Calendar">
           <div className="space-y-4">
             {calView.mode==="year" && <YearCalendar year={calView.year} hasDataDates={hasDataDates} onSelectMonth={(m)=>setCalView({...calView, mode:"month", month:m})} />}
             {calView.mode==="month" && (
@@ -179,13 +165,6 @@ export default function App(){
             )}
           </div>
         </Card>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 my-6">
-          <SummaryStat label="Today's Calories" value={todayCal} goal={goals.calories} color={COLORS.nutrition} />
-          <SummaryStat label="Today's Protein (g)" value={todayProt} goal={goals.protein} color={"#065f46"} />
-          <SummaryStat label="Today's Gym Volume" value={todayVol} color={COLORS.gym} />
-          <SummaryStat label={"Latest Weight (" + (unit==="imperial"?"lb":"kg") + ")"} value={latestWeight||0} goal={goals.weight} color={COLORS.body} />
-        </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
           <Card title="Gym Progress" borderColor={COLORS.gym} actions={
@@ -231,22 +210,9 @@ export default function App(){
             </div>
           </Card>
         </div>
-
-        <Card title="Insights (Gym Volume vs Calories vs Weight)">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={insights}>
-                <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
-                <Line type="monotone" dataKey="gymVolume" stroke={COLORS.gym} name="Gym Volume" />
-                <Line type="monotone" dataKey="calories" stroke={COLORS.nutrition} name="Calories" />
-                <Line type="monotone" dataKey="weight" stroke={COLORS.body} name="Weight" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
       </>)}
 
-      {view==="gym" && <GymSection {...{exerciseDB: normalizedExerciseDB,setExerciseDB,gymLog,setGymLog,topWeight}} onBack={()=>setView('home')} />}
+      {view==="gym" && <GymSection key="gym" {...{exerciseDB: normalizedExerciseDB,setExerciseDB,gymLog,setGymLog,topWeight}} onBack={()=>setView('home')} />}
       {view==="nutrition" && <NutritionSection {...{foodDB,setFoodDB,nutritionLog,setNutritionLog}} onBack={()=>setView('home')} />}
       {view==="body" && <BodySection {...{bodyLog,setBodyLog,unit}} onBack={()=>setView('home')} />}
       {view==="settings" && <SettingsSection {...{unit,setUnit,goals,setGoals}} />}
@@ -277,6 +243,39 @@ function TagChip({ tag }){
   return <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: color, color: "white" }}>{label}</span>;
 }
 
+function TagPicker({ current=[], onToggle, onClose }){
+  const ref = React.useRef(null);
+  React.useEffect(()=>{
+    function onDoc(e){
+      if(ref.current && !ref.current.contains(e.target)){ onClose && onClose(); }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return ()=>document.removeEventListener("mousedown", onDoc);
+  }, [onClose]);
+  return (
+    <div ref={ref} className="absolute z-50 mt-2 right-0 w-64 rounded-xl border bg-white shadow-lg p-2">
+      <div className="text-xs text-gray-500 px-1 mb-2">Pick tags</div>
+      <div className="flex flex-wrap gap-2">
+        {TAGS.map(t=>{
+          const selected = current.includes(t.key);
+          return (
+            <button key={t.key}
+              onClick={()=>onToggle && onToggle(t.key)}
+              className={cn("px-2 py-1 rounded-full text-xs border",
+                selected ? "" : "text-gray-600 bg-white hover:bg-gray-50")}
+              style={ selected ? { background:t.color, color:"white", borderColor:t.color } : {} }>
+              {selected ? "✓ " : ""}{t.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex justify-end mt-3">
+        <button onClick={onClose} className="text-xs px-2 py-1 rounded border hover:bg-gray-50">Done</button>
+      </div>
+    </div>
+  );
+}
+
 function DayDetails({ date, dayData, exerciseDB, foodDB }){
   if(!dayData) return <div className="text-sm text-gray-500">No data for this day.</div>;
   const exName = (id)=> exerciseDB.find(e=>e.id===id)?.name || "-";
@@ -296,18 +295,18 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
   const exById = React.useMemo(()=>Object.fromEntries(exerciseDB.map(e=>[e.id,e])), [exerciseDB]);
 
   // --- Add workout form state (controlled) ---
-  const [dateValue, setDateValue] = React.useState(todayISO()); // reset to today only on mount of Gym
+  const [dateValue, setDateValue] = React.useState(todayISO()); // resets to today on mount (entering Gym)
   const [exerciseId, setExerciseId] = React.useState(exerciseDB[0]?.id || "");
   const [sets, setSets] = React.useState("");
   const [reps, setReps] = React.useState("");
   const [weight, setWeight] = React.useState("");
   const [notes, setNotes] = React.useState("");
-  const [tagFilter, setTagFilter] = React.useState(""); // "" means All
+  const [tagFilter, setTagFilter] = React.useState("");
 
   // Collapsible states
   const [collapsedDays, setCollapsedDays] = React.useState({});
   const [collapsedExercises, setCollapsedExercises] = React.useState({});
-  const [openTagEditor, setOpenTagEditor] = React.useState(null); // exerciseId | null
+  const [openTagEditor, setOpenTagEditor] = React.useState(null); // exerciseId for popover
 
   const isDayCollapsed = (date) => collapsedDays[date] !== false;
   const toggleDay = (date) => setCollapsedDays(prev => ({ ...prev, [date]: !isDayCollapsed(date) }));
@@ -326,7 +325,6 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
     return list;
   }, [exerciseDB, tagFilter]);
 
-  // Ensure current exerciseId is valid after filter changes
   React.useEffect(()=>{
     if(!exerciseChoices.find(e=>e.id===exerciseId)){
       setExerciseId(exerciseChoices[0]?.id || "");
@@ -344,7 +342,7 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
     if(!dateValue || !exerciseId) return;
     const rec = { id: uid(), date: dateValue, exerciseId, sets: Number(sets)||0, reps: Number(reps)||0, weight: Number(weight)||0, notes: notes||"" };
     setGymLog(p=>[rec, ...p]);
-    // Reset fields EXCEPT date (and keep selected exercise for convenience)
+    // Reset input fields EXCEPT date and selected exercise
     setSets(""); setReps(""); setWeight(""); setNotes("");
   }
 
@@ -399,7 +397,6 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
         <Card title="Workout by day (collapsible)" borderColor="#C29B2C" actions={<Button variant="outline" onClick={handleExport}>Export CSV</Button>}>
           <div className="space-y-4">
             {groupedByDate.map(g => {
-              // Group within day by exerciseId
               const byExercise = {};
               for(const r of g.list){
                 const key = r.exerciseId;
@@ -437,22 +434,29 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                         const best = Math.max(0, ...grp.items.map(r=>Number(r.weight)||0));
                         const setCount = grp.items.reduce((a,b)=>a+(Number(b.sets)||0),0);
                         const exTags = Array.isArray(grp.ex?.tags) ? grp.ex.tags : [];
+                        const hasTags = exTags.length>0;
                         return (
-                          <div key={grp.eid} className="rounded-lg border">
+                          <div key={grp.eid} className="rounded-lg border relative">
                             <div className="flex items-center justify-between px-3 py-2 bg-yellow-50">
                               <div className="flex items-center gap-2">
                                 <div className="font-medium">{grp.ex?.name || "-"}</div>
-                                <div className="flex gap-1">{exTags.map(t => <TagChip key={t} tag={t} />)}</div>
+                                <div className="flex gap-1">
+                                  {hasTags ? exTags.map(t => <TagChip key={t} tag={t} />)
+                                    : <button
+                                        className="text-[10px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-600"
+                                        onClick={()=>setOpenTagEditor(grp.eid)}
+                                      >assign</button>}
+                                </div>
+                                {hasTags && (
+                                  <button className="text-xs text-gray-500 underline decoration-dotted ml-1"
+                                    onClick={()=>setOpenTagEditor(grp.eid)}>
+                                    edit
+                                  </button>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 text-xs text-gray-600">
                                 <span>{setCount} sets</span>
                                 <span>· PR {best} kg</span>
-                                {/* Tag edit icon */}
-                                <button
-                                  title="Edit tags"
-                                  onClick={()=>setOpenTagEditor(openTagEditor===grp.eid ? null : grp.eid)}
-                                  className="h-7 w-7 rounded-full border hover:bg-gray-100 text-gray-500"
-                                >🏷️</button>
                                 <button
                                   onClick={()=>toggleExercise(g.date, grp.eid)}
                                   className="h-7 w-7 rounded-full border hover:bg-gray-100"
@@ -462,20 +466,9 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                               </div>
                             </div>
 
-                            {/* Tag picker popover */}
                             {openTagEditor===grp.eid && (
-                              <div className="px-3 py-2 border-t bg-white text-sm">
-                                <div className="flex flex-wrap gap-3">
-                                  {TAGS.map(t => {
-                                    const checked = exTags.includes(t.key);
-                                    return (
-                                      <label key={t.key} className="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" checked={checked} onChange={()=>toggleExerciseTag(grp.eid, t.key)} />
-                                        <span className="px-2 py-0.5 rounded-full text-xs text-white" style={{ background:t.color }}>{t.label}</span>
-                                      </label>
-                                    );
-                                  })}
-                                </div>
+                              <div className="absolute right-2 top-10">
+                                <TagPicker current={exTags} onToggle={(tag)=>toggleExerciseTag(grp.eid, tag)} onClose={()=>setOpenTagEditor(null)} />
                               </div>
                             )}
 
@@ -525,6 +518,7 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
 function ExerciseDBPanel({ exerciseDB, setExerciseDB }){
   const [exerciseName, setExerciseName] = React.useState("");
   const [exerciseDBFilter, setExerciseDBFilter] = React.useState("");
+  const [openTagEditor, setOpenTagEditor] = React.useState(null);
 
   const filteredExerciseDB = React.useMemo(()=>{
     const q = exerciseDBFilter.toLowerCase();
@@ -549,25 +543,30 @@ function ExerciseDBPanel({ exerciseDB, setExerciseDB }){
       <div className="mb-2"><Input placeholder="Search exercises..." value={exerciseDBFilter} onChange={e=>setExerciseDBFilter(e.target.value)} /></div>
       <ul className="space-y-2">
         {filteredExerciseDB.map(ex=>(
-          <li key={ex.id} className="rounded-xl border px-3 py-2">
+          <li key={ex.id} className="rounded-xl border px-3 py-2 relative">
             <div className="flex items-center justify-between">
-              <span className="font-medium">{ex.name}</span>
-              <button className="h-7 w-7 rounded-full border hover:bg-gray-50 text-gray-500" title="Edit tags"
-                onClick={()=>toggleExerciseTag(ex.id, "_panelToggle")}
-                style={{ display: "none" }}
-              >🏷️</button>
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{ex.name}</span>
+                <div className="flex gap-1">
+                  {(Array.isArray(ex.tags) && ex.tags.length>0)
+                    ? ex.tags.map(t => <TagChip key={t} tag={t} />)
+                    : <button className="text-[10px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-600"
+                        onClick={()=>setOpenTagEditor(ex.id)}>assign</button>}
+                </div>
+                {(Array.isArray(ex.tags) && ex.tags.length>0) && (
+                  <button className="text-xs text-gray-500 underline decoration-dotted ml-1"
+                    onClick={()=>setOpenTagEditor(ex.id)}>
+                    edit
+                  </button>
+                )}
+              </div>
+              <div></div>
             </div>
-            <div className="flex items-center flex-wrap gap-2 mt-2">
-              {TAGS.map(t => {
-                const checked = Array.isArray(ex.tags) && ex.tags.includes(t.key);
-                return (
-                  <label key={t.key} className="flex items-center gap-2 cursor-pointer text-xs">
-                    <input type="checkbox" checked={!!checked} onChange={()=>toggleExerciseTag(ex.id, t.key)} />
-                    <span className="px-2 py-0.5 rounded-full text-white" style={{ background:t.color }}>{t.label}</span>
-                  </label>
-                );
-              })}
-            </div>
+            {openTagEditor===ex.id && (
+              <div className="absolute right-2 top-10">
+                <TagPicker current={Array.isArray(ex.tags)?ex.tags:[]} onToggle={(tag)=>toggleExerciseTag(ex.id, tag)} onClose={()=>setOpenTagEditor(null)} />
+              </div>
+            )}
           </li>
         ))}
         {filteredExerciseDB.length===0 && <li className="text-sm text-gray-500">No matches</li>}
