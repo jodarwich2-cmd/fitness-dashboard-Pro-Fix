@@ -30,7 +30,7 @@ export default function App(){
   const [unit, setUnit] = useLocalStorageState("unitPref", "metric");
   const [goals, setGoals] = useLocalStorageState("goals", { calories: 2200, protein: 180, weight: 80 });
 
-  // Data (keys unchanged)
+  // Data (keys unchanged; existing data preserved)
   const [exerciseDB, setExerciseDB] = useLocalStorageState("exDB", [
     { id: uid(), name: "Bench Press", tags: ["chest"] },
     { id: uid(), name: "Squat", tags: ["legs"] },
@@ -45,6 +45,7 @@ export default function App(){
   const [bodyLog, setBodyLog] = useLocalStorageState("bodyLog", []);
 
   const normalizedExerciseDB = React.useMemo(()=>exerciseDB.map(e=>({ ...e, tags: Array.isArray(e.tags) ? e.tags : [] })), [exerciseDB]);
+  const exById = React.useMemo(()=>Object.fromEntries(normalizedExerciseDB.map(e=>[e.id,e])), [normalizedExerciseDB]);
 
   const topWeight = React.useMemo(()=>{
     const map = {}; for(const r of gymLog){ map[r.exerciseId] = Math.max(map[r.exerciseId]||0, Number(r.weight)||0); } return map;
@@ -123,10 +124,7 @@ export default function App(){
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8">
-      <Header current={view} onNavigate={(v)=>{
-        // When leaving Gym and coming back, the gym form's date resets (handled inside GymSection mount).
-        setView(v);
-      }}>
+      <Header current={view} onNavigate={setView}>
         <Button variant="outline" onClick={backupJSON}>Backup JSON</Button>
         <label className="px-3 py-2 text-sm rounded-xl border cursor-pointer bg-white hover:bg-gray-50">
           Restore JSON
@@ -212,7 +210,7 @@ export default function App(){
         </div>
       </>)}
 
-      {view==="gym" && <GymSection key="gym" {...{exerciseDB: normalizedExerciseDB,setExerciseDB,gymLog,setGymLog,topWeight}} onBack={()=>setView('home')} />}
+      {view==="gym" && <GymSection key="gym" {...{exerciseDB: normalizedExerciseDB,setExerciseDB,gymLog,setGymLog,topWeight, exById}} onBack={()=>setView('home')} />}
       {view==="nutrition" && <NutritionSection {...{foodDB,setFoodDB,nutritionLog,setNutritionLog}} onBack={()=>setView('home')} />}
       {view==="body" && <BodySection {...{bodyLog,setBodyLog,unit}} onBack={()=>setView('home')} />}
       {view==="settings" && <SettingsSection {...{unit,setUnit,goals,setGoals}} />}
@@ -236,43 +234,26 @@ function SummaryStat({ label, value, goal, color }){
   );
 }
 
-function TagChip({ tag }){
+function TagChip({ tag, disabled }){
   if(!tag) return null;
   const color = TAG_COLOR[tag] || "#64748b";
   const label = TAG_LABEL[tag] || tag;
-  return <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: color, color: "white" }}>{label}</span>;
+  const className = cn("text-[10px] px-2 py-0.5 rounded-full select-none", disabled ? "opacity-80 cursor-default" : "");
+  return <span className={className} style={{ background: color, color: "white" }}>{label}</span>;
 }
 
-function TagPicker({ current=[], onToggle, onClose }){
-  const ref = React.useRef(null);
-  React.useEffect(()=>{
-    function onDoc(e){
-      if(ref.current && !ref.current.contains(e.target)){ onClose && onClose(); }
-    }
-    document.addEventListener("mousedown", onDoc);
-    return ()=>document.removeEventListener("mousedown", onDoc);
-  }, [onClose]);
+function TagToggleChip({ tag, selected, onClick }){
+  const t = TAGS.find(x=>x.key===tag);
+  const base = "text-[11px] px-2 py-1 rounded-full border transition select-none";
+  if(!t) return null;
   return (
-    <div ref={ref} className="absolute z-50 mt-2 right-0 w-64 rounded-xl border bg-white shadow-lg p-2">
-      <div className="text-xs text-gray-500 px-1 mb-2">Pick tags</div>
-      <div className="flex flex-wrap gap-2">
-        {TAGS.map(t=>{
-          const selected = current.includes(t.key);
-          return (
-            <button key={t.key}
-              onClick={()=>onToggle && onToggle(t.key)}
-              className={cn("px-2 py-1 rounded-full text-xs border",
-                selected ? "" : "text-gray-600 bg-white hover:bg-gray-50")}
-              style={ selected ? { background:t.color, color:"white", borderColor:t.color } : {} }>
-              {selected ? "✓ " : ""}{t.label}
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex justify-end mt-3">
-        <button onClick={onClose} className="text-xs px-2 py-1 rounded border hover:bg-gray-50">Done</button>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(base, selected ? "" : "text-gray-600 bg-white hover:bg-gray-50")}
+      style={ selected ? { background:t.color, color:"white", borderColor:t.color } : {} }>
+      {selected ? "✓ " : ""}{t.label}
+    </button>
   );
 }
 
@@ -291,11 +272,9 @@ function DayDetails({ date, dayData, exerciseDB, foodDB }){
   );
 }
 
-function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, onBack }){
-  const exById = React.useMemo(()=>Object.fromEntries(exerciseDB.map(e=>[e.id,e])), [exerciseDB]);
-
-  // --- Add workout form state (controlled) ---
-  const [dateValue, setDateValue] = React.useState(todayISO()); // resets to today on mount (entering Gym)
+function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, exById, onBack }){
+  // Add workout form state (controlled); date persists while on Gym view
+  const [dateValue, setDateValue] = React.useState(todayISO());
   const [exerciseId, setExerciseId] = React.useState(exerciseDB[0]?.id || "");
   const [sets, setSets] = React.useState("");
   const [reps, setReps] = React.useState("");
@@ -306,7 +285,6 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
   // Collapsible states
   const [collapsedDays, setCollapsedDays] = React.useState({});
   const [collapsedExercises, setCollapsedExercises] = React.useState({});
-  const [openTagEditor, setOpenTagEditor] = React.useState(null); // exerciseId for popover
 
   const isDayCollapsed = (date) => collapsedDays[date] !== false;
   const toggleDay = (date) => setCollapsedDays(prev => ({ ...prev, [date]: !isDayCollapsed(date) }));
@@ -342,17 +320,8 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
     if(!dateValue || !exerciseId) return;
     const rec = { id: uid(), date: dateValue, exerciseId, sets: Number(sets)||0, reps: Number(reps)||0, weight: Number(weight)||0, notes: notes||"" };
     setGymLog(p=>[rec, ...p]);
-    // Reset input fields EXCEPT date and selected exercise
+    // Reset fields EXCEPT date and selected exercise
     setSets(""); setReps(""); setWeight(""); setNotes("");
-  }
-
-  function toggleExerciseTag(exId, tagKey){
-    setExerciseDB(prev => prev.map(ex => {
-      if(ex.id !== exId) return ex;
-      const current = Array.isArray(ex.tags) ? ex.tags : [];
-      const exists = current.includes(tagKey);
-      return { ...ex, tags: exists ? current.filter(t=>t!==tagKey) : [...current, tagKey] };
-    }));
   }
 
   const groupedByDate = React.useMemo(()=>{
@@ -434,25 +403,12 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                         const best = Math.max(0, ...grp.items.map(r=>Number(r.weight)||0));
                         const setCount = grp.items.reduce((a,b)=>a+(Number(b.sets)||0),0);
                         const exTags = Array.isArray(grp.ex?.tags) ? grp.ex.tags : [];
-                        const hasTags = exTags.length>0;
                         return (
-                          <div key={grp.eid} className="rounded-lg border relative">
+                          <div key={grp.eid} className="rounded-lg border">
                             <div className="flex items-center justify-between px-3 py-2 bg-yellow-50">
                               <div className="flex items-center gap-2">
                                 <div className="font-medium">{grp.ex?.name || "-"}</div>
-                                <div className="flex gap-1">
-                                  {hasTags ? exTags.map(t => <TagChip key={t} tag={t} />)
-                                    : <button
-                                        className="text-[10px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-600"
-                                        onClick={()=>setOpenTagEditor(grp.eid)}
-                                      >assign</button>}
-                                </div>
-                                {hasTags && (
-                                  <button className="text-xs text-gray-500 underline decoration-dotted ml-1"
-                                    onClick={()=>setOpenTagEditor(grp.eid)}>
-                                    edit
-                                  </button>
-                                )}
+                                <div className="flex gap-1">{exTags.map(t => <TagChip key={t} tag={t} disabled />)}</div>
                               </div>
                               <div className="flex items-center gap-2 text-xs text-gray-600">
                                 <span>{setCount} sets</span>
@@ -465,12 +421,6 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
                                 >{eCollapsed ? "▸" : "▾"}</button>
                               </div>
                             </div>
-
-                            {openTagEditor===grp.eid && (
-                              <div className="absolute right-2 top-10">
-                                <TagPicker current={exTags} onToggle={(tag)=>toggleExerciseTag(grp.eid, tag)} onClose={()=>setOpenTagEditor(null)} />
-                              </div>
-                            )}
 
                             {!eCollapsed && (
                               <div className="overflow-x-auto">
@@ -518,7 +468,6 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
 function ExerciseDBPanel({ exerciseDB, setExerciseDB }){
   const [exerciseName, setExerciseName] = React.useState("");
   const [exerciseDBFilter, setExerciseDBFilter] = React.useState("");
-  const [openTagEditor, setOpenTagEditor] = React.useState(null);
 
   const filteredExerciseDB = React.useMemo(()=>{
     const q = exerciseDBFilter.toLowerCase();
@@ -543,30 +492,23 @@ function ExerciseDBPanel({ exerciseDB, setExerciseDB }){
       <div className="mb-2"><Input placeholder="Search exercises..." value={exerciseDBFilter} onChange={e=>setExerciseDBFilter(e.target.value)} /></div>
       <ul className="space-y-2">
         {filteredExerciseDB.map(ex=>(
-          <li key={ex.id} className="rounded-xl border px-3 py-2 relative">
+          <li key={ex.id} className="rounded-xl border px-3 py-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{ex.name}</span>
-                <div className="flex gap-1">
-                  {(Array.isArray(ex.tags) && ex.tags.length>0)
-                    ? ex.tags.map(t => <TagChip key={t} tag={t} />)
-                    : <button className="text-[10px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-600"
-                        onClick={()=>setOpenTagEditor(ex.id)}>assign</button>}
-                </div>
-                {(Array.isArray(ex.tags) && ex.tags.length>0) && (
-                  <button className="text-xs text-gray-500 underline decoration-dotted ml-1"
-                    onClick={()=>setOpenTagEditor(ex.id)}>
-                    edit
-                  </button>
-                )}
-              </div>
-              <div></div>
+              <span className="font-medium">{ex.name}</span>
             </div>
-            {openTagEditor===ex.id && (
-              <div className="absolute right-2 top-10">
-                <TagPicker current={Array.isArray(ex.tags)?ex.tags:[]} onToggle={(tag)=>toggleExerciseTag(ex.id, tag)} onClose={()=>setOpenTagEditor(null)} />
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {TAGS.map(t => {
+                const selected = Array.isArray(ex.tags) && ex.tags.includes(t.key);
+                return (
+                  <TagToggleChip
+                    key={t.key}
+                    tag={t.key}
+                    selected={!!selected}
+                    onClick={()=>toggleExerciseTag(ex.id, t.key)}
+                  />
+                );
+              })}
+            </div>
           </li>
         ))}
         {filteredExerciseDB.length===0 && <li className="text-sm text-gray-500">No matches</li>}
@@ -577,7 +519,6 @@ function ExerciseDBPanel({ exerciseDB, setExerciseDB }){
 
 function NutritionSection({ foodDB, setFoodDB, nutritionLog, setNutritionLog, onBack }){
   const [food, setFood] = React.useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
-  const [foodFilter, setFoodFilter] = React.useState("");
 
   function handleExport(){
     const rows = nutritionLog.map(r=>({date:r.date, food:(foodDB.find(f=>f.id===r.foodId)?.name||"-"), qty:r.qty, calories:r.calories, protein:r.protein, notes:r.notes||""}));
@@ -596,11 +537,6 @@ function NutritionSection({ foodDB, setFoodDB, nutritionLog, setNutritionLog, on
     }
     return Object.values(map).sort((a,b)=>b.date.localeCompare(a.date));
   }, [nutritionLog]);
-
-  const filteredFoodDB = React.useMemo(()=>{
-    const q = foodFilter.toLowerCase();
-    return foodDB.filter(f => f.name.toLowerCase().includes(q));
-  }, [foodDB, foodFilter]);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
