@@ -2,10 +2,27 @@ import React from "react";
 import { Header, Card, Button, Input, NumberInput, Select } from "./components.jsx";
 import { YearCalendar, MonthCalendar } from "./calendar.jsx";
 import { uid, useLocalStorageState, todayISO, toCSV, downloadText } from "./utils.js";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, AreaChart, Area } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 function cn(...a){ return a.filter(Boolean).join(" "); }
 const COLORS = { gym: "#C29B2C", nutrition: "#16a34a", body: "#2563eb" };
+
+// Plan window for progress bar
+const PLAN_START = new Date(2025, 6, 1); // July=6
+const PLAN_END = new Date(2026, 9, 8);   // Oct=9
+
+function toLocalISO(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function weeksBetweenInclusive(start, end){
+  const MS = 24*60*60*1000;
+  const days = Math.floor((end - start) / MS) + 1;
+  return Math.ceil(days / 7);
+}
 
 export default function App(){
   const [view, setView] = React.useState("home");
@@ -39,12 +56,12 @@ export default function App(){
   const hasDataDates = React.useMemo(()=> new Set(Object.keys(byDate)), [byDate]);
 
   // === OVERVIEW CHART DATA ===
-  // Volume by date (existing)
+  // Volume by date
   const gymVolumeByDate = React.useMemo(()=>{
     const temp={}; for(const r of gymLog){ const k=r.date; const vol=(Number(r.sets)||0)*(Number(r.reps)||0)*(Number(r.weight)||0); temp[k]=(temp[k]||0)+vol; }
     return Object.entries(temp).map(([date,volume])=>({date, volume})).sort((a,b)=>a.date.localeCompare(b.date));
   }, [gymLog]);
-  // NEW: Max weight by date (overall top weight used on each day, across all exercises)
+  // Max weight by date (overall top weight used on each day)
   const gymMaxWeightByDate = React.useMemo(()=>{
     const temp={}; for(const r of gymLog){ const k=r.date; temp[k] = Math.max(temp[k]||0, Number(r.weight)||0); }
     return Object.entries(temp).map(([date,maxWeight])=>({date, maxWeight})).sort((a,b)=>a.date.localeCompare(b.date));
@@ -73,6 +90,27 @@ export default function App(){
   const todayVol = (gymVolumeByDate.find(x=>x.date===today)?.volume) || 0;
   const latestWeight = bodyByDate.length ? bodyByDate[bodyByDate.length-1].weight : null;
 
+  // === PLAN PROGRESS BAR ===
+  const plan = React.useMemo(()=>{
+    // Count unique gym dates within plan range
+    const start = PLAN_START;
+    const end = PLAN_END;
+    const MS = 24*60*60*1000;
+    const uniq = new Set();
+    for(const r of gymLog){
+      const dParts = r.date.split("-").map(n=>Number(n));
+      if(dParts.length===3){
+        const d = new Date(dParts[0], dParts[1]-1, dParts[2]);
+        if(d >= start && d <= end){ uniq.add(r.date); }
+      }
+    }
+    const weeks = weeksBetweenInclusive(start, end);
+    const target = weeks * 3;
+    const actual = uniq.size;
+    const pct = target>0 ? (actual/target)*100 : 0;
+    return { target, actual, pct };
+  }, [gymLog]);
+
   const [calView, setCalView] = React.useState({ mode:"year", year:new Date().getFullYear(), month:new Date().getMonth(), selectedDay:null });
 
   function backupJSON(){
@@ -97,7 +135,46 @@ export default function App(){
       </Header>
 
       {view==="home" && (<>
-        <Card title="Calendar" actions={<div>{calView.mode==="month" && <Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back to Year</Button>}</div>}>
+        <Card
+          title="Calendar"
+          actions={
+            <div className="flex items-center gap-2">
+              {calView.mode==="month" && <Button variant="outline" onClick={()=>setCalView({...calView, mode:"year", selectedDay:null})}>Back to Year</Button>}
+              {calView.mode==="year" && (<>
+                <Button variant="outline" onClick={()=>setCalView(v=>({...v, year: v.year-1}))}>◀ Year</Button>
+                <div className="text-sm text-gray-500">{calView.year}</div>
+                <Button variant="outline" onClick={()=>setCalView(v=>({...v, year: v.year+1}))}>Year ▶</Button>
+              </>)}
+            </div>
+          }>
+          {/* Plan progress bar (25% of calendar height visually -> give a generous height) */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+              <div>Gym Plan Progress (3 days/week · Jul 1, 2025 → Oct 8, 2026)</div>
+              <div>{plan.actual} / {plan.target} ({Math.round(plan.pct)}%)</div>
+            </div>
+            <div className="w-full h-6 rounded-xl bg-gray-200 overflow-hidden border">
+              <div
+                className="h-6"
+                style={{
+                  width: Math.min(100, plan.pct) + "%",
+                  background: COLORS.gym
+                }}
+                title="Planned progress"
+              />
+              {plan.pct>100 && (
+                <div
+                  className="h-6 -mt-6 opacity-80"
+                  style={{
+                    width: "100%",
+                    background: "repeating-linear-gradient(45deg, rgba(194,155,44,0.2), rgba(194,155,44,0.2) 8px, rgba(194,155,44,0.35) 8px, rgba(194,155,44,0.35) 16px)"
+                  }}
+                  title="Over plan"
+                />
+              )}
+            </div>
+          </div>
+
           <div className="space-y-4">
             {calView.mode==="year" && <YearCalendar year={calView.year} hasDataDates={hasDataDates} onSelectMonth={(m)=>setCalView({...calView, mode:"month", month:m})} />}
             {calView.mode==="month" && (
@@ -122,59 +199,40 @@ export default function App(){
           <SummaryStat label={"Latest Weight (" + (unit==="imperial"?"lb":"kg") + ")"} value={latestWeight||0} goal={goals.weight} color={COLORS.body} />
         </div>
 
-        <Card
-          title="Gym Progress"
-          borderColor={COLORS.gym}
-          actions={
-            <div className="flex items-center gap-2">
-              <Select
-                value={gymOverviewMetric}
-                onChange={setGymOverviewMetric}
-                options={[
-                  { value: "max", label: "Max Weight" },
-                  { value: "volume", label: "Volume" },
-                ]}
-              />
-              <Button variant="outline" onClick={()=>setView("gym")}>Open</Button>
-            </div>
-          }
-        >
-          <div className="h-64 cursor-pointer" onClick={()=>setView("gym")}>
-            <ResponsiveContainer width="100%" height="100%">
-              {gymOverviewMetric==="max" ? (
-                <LineChart data={gymMaxWeightByDate}>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
+          <Card
+            title="Gym Progress"
+            borderColor={COLORS.gym}
+            actions={
+              <div className="flex items-center gap-2">
+                <Select
+                  value={gymOverviewMetric}
+                  onChange={setGymOverviewMetric}
+                  options={[
+                    { value: "max", label: "Max Weight" },
+                    { value: "volume", label: "Volume" },
+                  ]}
+                />
+                <Button variant="outline" onClick={()=>setView("gym")}>Open</Button>
+              </div>
+            }
+          >
+            <div className="h-64 cursor-pointer" onClick={()=>setView("gym")}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={gymOverviewMetric==="max" ? gymMaxWeightByDate : gymVolumeByDate}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis />
                   <Tooltip />
                   <Legend />
-                  <Line type="monotone" dataKey="maxWeight" stroke={COLORS.gym} name="Max Weight (any exercise)" />
+                  {gymOverviewMetric==="max"
+                    ? <Line type="monotone" dataKey="maxWeight" stroke={COLORS.gym} name="Max Weight (any exercise)" />
+                    : <Line type="monotone" dataKey="volume" stroke={COLORS.gym} name="Volume" />}
                 </LineChart>
-              ) : (
-                <AreaChart data={gymVolumeByDate}>
-                  <defs><linearGradient id="gymGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS.gym} stopOpacity={0.4}/><stop offset="95%" stopColor={COLORS.gym} stopOpacity={0}/></linearGradient></defs>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" /><YAxis /><Tooltip />
-                  <Area type="monotone" dataKey="volume" stroke={COLORS.gym} fill="url(#gymGrad)" name="Volume" />
-                </AreaChart>
-              )}
-            </ResponsiveContainer>
-          </div>
-        </Card>
+              </ResponsiveContainer>
+            </div>
+          </Card>
 
-        <Card title="Insights (Gym Volume vs Calories vs Weight)">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={{
-                toArray(){return []}
-              } as any}>
-                {/* Placeholder kept for compatibility; actual chart is above */}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
           <Card title="Nutrition" borderColor={COLORS.nutrition} actions={<Button variant="outline" onClick={()=>setView("nutrition")}>Open</Button>}>
             <div className="h-64 cursor-pointer" onClick={()=>setView("nutrition")}>
               <ResponsiveContainer width="100%" height="100%">
@@ -208,6 +266,23 @@ export default function App(){
             </div>
           </Card>
         </div>
+
+        <Card title="Insights (Gym Volume vs Calories vs Weight)">
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={insights}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="gymVolume" stroke={COLORS.gym} name="Gym Volume" />
+                <Line type="monotone" dataKey="calories" stroke={COLORS.nutrition} name="Calories" />
+                <Line type="monotone" dataKey="weight" stroke={COLORS.body} name="Weight" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
       </>)}
 
       {view==="gym" && <GymSection {...{exerciseDB,setExerciseDB,gymLog,setGymLog,topWeight}} onBack={()=>setView('home')} />}
@@ -262,7 +337,7 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
     downloadText("gym-log.csv", csv);
   }
 
-  const grouped = React.useMemo(()=>{
+  const groupedByDate = React.useMemo(()=>{
     const map = {}; for(const r of gymLog){ const d=r.date; if(!map[d]) map[d]=[]; map[d].push(r); }
     return Object.entries(map).map(([date, list])=>({ date, list })).sort((a,b)=>b.date.localeCompare(a.date));
   }, [gymLog]);
@@ -295,29 +370,50 @@ function GymSection({ exerciseDB, setExerciseDB, gymLog, setGymLog, topWeight, o
         <Card title="Workout by day" borderColor="#C29B2C" actions={<Button variant="outline" onClick={handleExport}>Export CSV</Button>}>
           <div className="mb-3"><Input placeholder="Search logged exercises..." value={filter} onChange={e=>setFilter(e.target.value)} /></div>
           <div className="space-y-4">
-            {grouped.map(g => (
-              <div key={g.date} className="rounded-xl border p-3">
-                <div className="font-semibold mb-2">{g.date}</div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead><tr className="text-left text-gray-500"><th className="py-2 pr-2">Exercise</th><th className="py-2 pr-2">Sets</th><th className="py-2 pr-2">Reps</th><th className="py-2 pr-2">Weight</th><th className="py-2 pr-2">Notes</th><th className="py-2 pr-2">PR</th><th className="py-2 pr-2">Actions</th></tr></thead>
-                    <tbody>
-                      {g.list.filter(r=>exName(r.exerciseId).toLowerCase().includes(filter.toLowerCase())).map(r => (
-                        <tr key={r.id} className="border-t">
-                          <td className="py-2 pr-2">{exName(r.exerciseId)}</td>
-                          <td className="py-2 pr-2">{r.sets}</td>
-                          <td className="py-2 pr-2">{r.reps}</td>
-                          <td className="py-2 pr-2">{r.weight}</td>
-                          <td className="py-2 pr-2">{r.notes}</td>
-                          <td className="py-2 pr-2">{(topWeight[r.exerciseId]||0)===r.weight ? <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">PR</span> : ""}</td>
-                          <td className="py-2 pr-2"><Button variant="outline" onClick={()=>setGymLog(p=>p.filter(x=>x.id!==r.id))}>Delete</Button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {groupedByDate.map(g => {
+              // Group within day by exerciseId
+              const byExercise = {};
+              for(const r of g.list){
+                const key = r.exerciseId;
+                if(!byExercise[key]) byExercise[key] = [];
+                byExercise[key].push(r);
+              }
+              const groups = Object.entries(byExercise).map(([eid, items]) => ({ eid, name: exName(eid), items }))
+                .filter(grp => grp.name.toLowerCase().includes(filter.toLowerCase()))
+                .sort((a,b)=>a.name.localeCompare(b.name));
+              return (
+                <div key={g.date} className="rounded-xl border p-3">
+                  <div className="font-semibold mb-2">{g.date}</div>
+                  <div className="space-y-3">
+                    {groups.map(grp => (
+                      <div key={grp.eid} className="rounded-lg border">
+                        <div className="px-3 py-2 font-medium bg-yellow-50">{grp.name}</div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-sm">
+                            <thead><tr className="text-left text-gray-500">
+                              <th className="py-2 pr-2">Sets</th><th className="py-2 pr-2">Reps</th><th className="py-2 pr-2">Weight</th><th className="py-2 pr-2">Notes</th><th className="py-2 pr-2">PR</th><th className="py-2 pr-2">Actions</th>
+                            </tr></thead>
+                            <tbody>
+                              {grp.items.map(r => (
+                                <tr key={r.id} className="border-t">
+                                  <td className="py-2 pr-2">{r.sets}</td>
+                                  <td className="py-2 pr-2">{r.reps}</td>
+                                  <td className="py-2 pr-2">{r.weight}</td>
+                                  <td className="py-2 pr-2">{r.notes}</td>
+                                  <td className="py-2 pr-2">{(topWeight[r.exerciseId]||0)===r.weight ? <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">PR</span> : ""}</td>
+                                  <td className="py-2 pr-2"><Button variant="outline" onClick={()=>setGymLog(p=>p.filter(x=>x.id!==r.id))}>Delete</Button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                    {groups.length===0 && <div className="text-sm text-gray-500">No matches</div>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </div>
