@@ -1,7 +1,15 @@
 import React from "react";
 
 export function uid(){ return Math.random().toString(36).slice(2,10); }
-export function todayISO(){ return new Date().toISOString().slice(0,10); }
+
+// Local-time based ISO date (YYYY-MM-DD) to avoid UTC day shift
+export function todayISO(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 
 export function useLocalStorageState(key, initial){
   const [state, setState] = React.useState(()=>{
@@ -29,7 +37,6 @@ export function downloadText(filename, text){
 export function toCSV(rows, headers){
   const esc = (v) => {
     const s = (v ?? "").toString();
-    // FIX: use single quotes so we can include a double quote safely
     if (s.includes(',') || s.includes('"') || s.includes('\n')) {
       return '"' + s.replace(/"/g, '""') + '"';
     }
